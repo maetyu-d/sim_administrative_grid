@@ -102,7 +102,8 @@ enum class BuildingStatus : int {
     Starved = 2,
     OutputBlocked = 3,
     NoRail = 4,
-    Full = 5
+    Full = 5,
+    Suspended = 6
 };
 
 enum class OverlayMode : int {
@@ -110,6 +111,12 @@ enum class OverlayMode : int {
     Resources = 1,
     Flow = 2,
     Stress = 3
+};
+
+enum class GameMode : int {
+    Title = 0,
+    Playing = 1,
+    Paused = 2
 };
 
 struct Cell {
@@ -130,6 +137,7 @@ struct Cell {
     float blockedFlow = 0.0f;
     float packetFlow = 0.0f;
     int packetKind = 0;
+    int shutdownTimer = 0;
 };
 
 struct Vertex {
@@ -230,6 +238,7 @@ public:
         if (!createShaders() || !createTextureAtlas() || !createBuffers() || !createFramebuffer(ScreenW, ScreenH)) return false;
         rng_.seed(static_cast<unsigned int>(std::time(nullptr)));
         generateMap();
+        mode_ = GameMode::Title;
         lastTicks_ = SDL_GetTicks();
         return true;
     }
@@ -323,9 +332,12 @@ private:
             uniform float uTime;
             uniform float uNight;
             uniform float uFog;
+            uniform float uUgly;
             out vec4 frag;
             void main() {
                 vec4 c = vColor;
+                vec3 civic = vec3(c.r * 0.90 + 0.08, c.g * 1.02 + 0.09, c.b * 0.92 + 0.075);
+                c.rgb = mix(c.rgb, civic, (1.0 - uUgly) * 0.22);
                 vec4 texel = texture(uAtlas, vUv);
                 c.rgb = mix(c.rgb, texel.rgb * (0.55 + c.rgb * 0.75), texel.a * 0.72);
                 if (vKind > 5.5 && vKind < 6.5) {
@@ -336,6 +348,10 @@ private:
                     float lit = 0.14 + uNight * 0.30;
                     c.rgb += vec3(lit * 0.035, lit * 0.042, lit * 0.05);
                 }
+                float bruise = sin(vWorld.x * 0.023 + vWorld.y * 0.017 + uTime * 0.18) * 0.5 + 0.5;
+                vec3 sick = vec3(c.r * 0.68 + 0.095, c.g * 0.58 + 0.055, c.b * 0.52 + 0.045);
+                vec3 rust = vec3(0.34, 0.08, 0.06) * bruise;
+                c.rgb = mix(c.rgb, sick + rust * 0.18, uUgly * 0.58);
                 c.rgb *= mix(0.94, 0.55, uNight);
                 c.rgb = mix(c.rgb, vec3(0.62, 0.64, 0.61), uFog * 0.09);
                 frag = c;
@@ -360,16 +376,23 @@ private:
             uniform float uTime;
             uniform float uNight;
             uniform float uPollution;
+            uniform float uUgly;
             out vec4 frag;
             void main() {
                 vec3 col = texture(uScene, vUv).rgb;
                 float vignette = smoothstep(0.86, 0.18, distance(vUv, vec2(0.5)));
                 float paper = fract(sin(dot(floor(vUv * 900.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
                 float scan = sin((vUv.y + uTime * 0.01) * 700.0) * 0.004;
+                vec3 civicWash = vec3(0.026, 0.046, 0.034) * (1.0 - uUgly);
                 vec3 night = vec3(0.025, 0.035, 0.050) * uNight;
                 vec3 smog = vec3(0.12, 0.10, 0.07) * uPollution * 0.11;
-                col = col * (0.88 + vignette * 0.12) + night + smog + scan + paper * 0.018;
-                col = mix(vec3(dot(col, vec3(0.32, 0.42, 0.26))), col, 0.76);
+                float warpNoise = sin(vUv.y * 31.0 + uTime * 0.7) * sin(vUv.x * 19.0 - uTime * 0.23);
+                vec3 stain = vec3(0.20, 0.08, 0.055) * max(0.0, warpNoise) * uUgly * 0.18;
+                col = col * (0.96 + vignette * 0.06) + civicWash + night + smog + stain + scan + paper * (0.010 + uUgly * 0.032);
+                float grey = dot(col, vec3(0.32, 0.42, 0.26));
+                col = mix(vec3(grey), col, 0.92 - uUgly * 0.40);
+                col.r += uUgly * 0.018;
+                col.b *= 1.0 - uUgly * 0.09;
                 frag = vec4(col, 1.0);
             }
         )GLSL";
@@ -462,18 +485,18 @@ private:
         };
 
         fillMaterial(0, rgba(230, 230, 230), 1, 0);    // transparent fallback/text
-        fillMaterial(1, rgba(82, 84, 80), 2, 1);       // concrete grid
-        fillMaterial(2, rgba(38, 39, 38), 3, 2);       // asphalt
-        fillMaterial(3, rgba(60, 52, 60), 4, 4);       // conveyor rubber
-        fillMaterial(4, rgba(52, 51, 46), 5, 3);       // rail ballast
+        fillMaterial(1, rgba(118, 128, 116), 2, 1);    // civic concrete grid
+        fillMaterial(2, rgba(55, 62, 58), 3, 2);       // softened asphalt
+        fillMaterial(3, rgba(72, 78, 72), 4, 4);       // conveyor rubber
+        fillMaterial(4, rgba(68, 72, 66), 5, 3);       // rail ballast
         fillMaterial(5, rgba(138, 83, 116), 6, 0);     // pink block material
-        fillMaterial(6, rgba(40, 39, 40), 7, 1);       // holding/metal
+        fillMaterial(6, rgba(54, 62, 58), 7, 1);       // holding/metal
         fillMaterial(7, rgba(15, 15, 14), 8, 2);       // mine carbon
-        fillMaterial(8, rgba(128, 101, 47), 9, 1);     // factory plate
-        fillMaterial(9, rgba(172, 132, 42), 10, 3);    // refinery brass
-        fillMaterial(10, rgba(78, 86, 88), 11, 1);     // port concrete
-        fillMaterial(11, rgba(17, 19, 19), 12, 2);     // dark UI panel
-        fillMaterial(12, rgba(36, 42, 39), 13, 1);     // button metal
+        fillMaterial(8, rgba(128, 122, 76), 9, 1);     // factory plate
+        fillMaterial(9, rgba(166, 148, 72), 10, 3);    // refinery brass
+        fillMaterial(10, rgba(92, 104, 100), 11, 1);   // port concrete
+        fillMaterial(11, rgba(17, 22, 20), 12, 2);     // dark civic UI panel
+        fillMaterial(12, rgba(42, 50, 46), 13, 1);     // button metal
         fillMaterial(13, rgba(150, 116, 44), 14, 3);   // gold
         fillMaterial(14, rgba(218, 204, 143), 15, 0);  // refined
         fillMaterial(15, rgba(58, 47, 32), 16, 2);     // stain
@@ -697,6 +720,76 @@ private:
         addAlert("VIEW: " + overlayName(), rgba(205, 214, 202), 1.8f);
     }
 
+    void resetEconomy() {
+        profit_ = 0.0f;
+        cash_ = 1000.0f;
+        upkeep_ = 0.0f;
+        budget_ = cash_;
+        stability_ = 0.78f;
+        purity_ = 0.98f;
+        variance_ = 0.04f;
+        auditPressure_ = 0.0f;
+        routeEfficiency_ = 1.0f;
+        exportPenalty_ = 0.0f;
+        containmentCost_ = 0.0f;
+        dehumanisation_ = 0.0f;
+        exported_ = 0.0f;
+        goalComplete_ = false;
+        auditFailed_ = false;
+        for (bool& seen : milestoneSeen_) seen = false;
+        alerts_.clear();
+    }
+
+    void setTile(int x, int y, Tile tile, Direction dir = Direction::East) {
+        if (!inside(x, y)) return;
+        Cell& c = cells_[index(x, y)];
+        c.tile = tile;
+        c.zone = tile;
+        c.dir = dir;
+        c.variant = static_cast<uint8_t>((x * 37 + y * 19 + static_cast<int>(tile) * 13) & 15);
+    }
+
+    void addRoadLine(int x0, int y0, int x1, int y1) {
+        int dx = (x1 > x0) ? 1 : (x1 < x0 ? -1 : 0);
+        int dy = (y1 > y0) ? 1 : (y1 < y0 ? -1 : 0);
+        Direction dir = std::abs(x1 - x0) >= std::abs(y1 - y0) ? (dx >= 0 ? Direction::East : Direction::West) : (dy >= 0 ? Direction::South : Direction::North);
+        int x = x0, y = y0;
+        while (inside(x, y)) {
+            setTile(x, y, Tile::Road, dir);
+            if (x == x1 && y == y1) break;
+            x += dx;
+            y += dy;
+        }
+    }
+
+    void addRailLine(int x0, int y0, int x1, int y1) {
+        int dx = (x1 > x0) ? 1 : (x1 < x0 ? -1 : 0);
+        int dy = (y1 > y0) ? 1 : (y1 < y0 ? -1 : 0);
+        Direction dir = std::abs(x1 - x0) >= std::abs(y1 - y0) ? (dx >= 0 ? Direction::East : Direction::West) : (dy >= 0 ? Direction::South : Direction::North);
+        int x = x0, y = y0;
+        while (inside(x, y)) {
+            setTile(x, y, Tile::Rail, dir);
+            if (x == x1 && y == y1) break;
+            x += dx;
+            y += dy;
+        }
+    }
+
+    std::string presetName() const {
+        switch (presetIndex_) {
+            case 1: return "RAIL SIDING";
+            case 2: return "DIAGNOSTIC CHAIN";
+            default: return "BLANK GRID";
+        }
+    }
+
+    void cyclePreset(int delta) {
+        presetIndex_ = (presetIndex_ + delta) % 3;
+        if (presetIndex_ < 0) presetIndex_ += 3;
+        generateMap();
+        mode_ = GameMode::Title;
+    }
+
     void generateMap() {
         cells_.assign(MapW * MapH, Cell{});
         std::uniform_real_distribution<float> d(0.0f, 1.0f);
@@ -708,41 +801,31 @@ private:
                 c.desirability = d(rng_);
             }
         }
-        for (int x = 6; x < MapW - 6; ++x) cells_[index(x, MapH / 2)].tile = Tile::Road;
-        for (int y = 10; y < MapH - 10; ++y) cells_[index(MapW / 2, y)].tile = Tile::Road;
 
-        cells_[index(20, 40)].tile = Tile::Block;
-        cells_[index(24, 40)].tile = Tile::Holding;
-        cells_[index(30, 40)].tile = Tile::Mine;
-        cells_[index(38, 40)].tile = Tile::Factory;
-        cells_[index(48, 40)].tile = Tile::Refinery;
-        cells_[index(62, 40)].tile = Tile::Port;
-        cells_[index(20, 40)].dir = Direction::East;
-        cells_[index(24, 40)].dir = Direction::East;
-        cells_[index(30, 40)].dir = Direction::East;
-        cells_[index(38, 40)].dir = Direction::East;
-        cells_[index(48, 40)].dir = Direction::East;
-        cells_[index(62, 40)].dir = Direction::East;
-        for (int x = 21; x < 62; ++x) if (cells_[index(x, 40)].tile == Tile::Empty) {
-            Cell& c = cells_[index(x, 40)];
-            c.tile = x < 48 ? Tile::Conveyor : Tile::Rail;
-            c.dir = Direction::East;
+        addRoadLine(8, MapH / 2, MapW - 16, MapH / 2);
+        addRoadLine(MapW / 2, 12, MapW / 2, MapH - 16);
+        addRailLine(8, MapH - 18, MapW - 10, MapH - 18);
+
+        if (presetIndex_ == 1) {
+            addRailLine(16, 24, 82, 24);
+            setTile(78, 24, Tile::Port, Direction::East);
+            addRoadLine(20, 30, 54, 30);
+            setTile(24, 30, Tile::Holding, Direction::East);
+        } else if (presetIndex_ == 2) {
+            setTile(20, 40, Tile::Block, Direction::East);
+            setTile(24, 40, Tile::Holding, Direction::East);
+            setTile(30, 40, Tile::Mine, Direction::East);
+            setTile(38, 40, Tile::Factory, Direction::East);
+            setTile(48, 40, Tile::Refinery, Direction::East);
+            setTile(62, 40, Tile::Port, Direction::East);
+            for (int x = 21; x < 62; ++x) if (cells_[index(x, 40)].tile == Tile::Empty) {
+                setTile(x, 40, x < 48 ? Tile::Conveyor : Tile::Rail, Direction::East);
+            }
         }
 
         camera_ = {MapW * TileSize * 0.5f, MapH * TileSize * 0.5f};
         zoom_ = targetZoom_ = 0.70f;
-        profit_ = 0.0f;
-        cash_ = 700.0f;
-        upkeep_ = 0.0f;
-        budget_ = cash_;
-        stability_ = 0.72f;
-        purity_ = 0.96f;
-        variance_ = 0.08f;
-        exported_ = 0.0f;
-        goalComplete_ = false;
-        auditFailed_ = false;
-        for (bool& seen : milestoneSeen_) seen = false;
-        alerts_.clear();
+        resetEconomy();
         addAlert("DIRECTIVE: EXPORT 50 REFINED. STABILITY ABOVE 60. VARIANCE BELOW 35.", rgba(205, 214, 202), 6.0f);
     }
 
@@ -766,9 +849,11 @@ private:
             addAlert("SAVE FAILED: FILE NOT OPENED.", rgba(218, 139, 154), 3.0f);
             return;
         }
-        out << "ADMIN_GRID_SAVE 1\n";
+        out << "ADMIN_GRID_SAVE 3\n";
         out << cash_ << ' ' << profit_ << ' ' << upkeep_ << ' ' << stability_ << ' ' << purity_ << ' '
-            << variance_ << ' ' << exported_ << ' ' << goalComplete_ << ' ' << auditFailed_ << '\n';
+            << variance_ << ' ' << exported_ << ' ' << goalComplete_ << ' ' << auditFailed_ << ' '
+            << auditPressure_ << ' ' << routeEfficiency_ << ' ' << exportPenalty_ << ' ' << containmentCost_ << ' '
+            << presetIndex_ << ' ' << dehumanisation_ << '\n';
         out << camera_.x << ' ' << camera_.y << ' ' << zoom_ << ' ' << targetZoom_ << ' '
             << static_cast<int>(tool_) << ' ' << static_cast<int>(placementDir_) << '\n';
         out << MapW << ' ' << MapH << '\n';
@@ -777,7 +862,7 @@ private:
                 << c.growth << ' ' << c.pollution << ' ' << c.desirability << ' '
                 << static_cast<int>(c.variant) << ' ' << static_cast<int>(c.dir) << ' '
                 << static_cast<int>(c.status) << ' ' << c.pink << ' ' << c.fuel << ' '
-                << c.gold << ' ' << c.refined << '\n';
+                << c.gold << ' ' << c.refined << ' ' << c.shutdownTimer << '\n';
         }
         addAlert("SAVE RECORDED: ADMINISTRATIVE GRID.", rgba(205, 214, 202), 3.0f);
     }
@@ -791,11 +876,24 @@ private:
         std::string magic;
         int version = 0;
         in >> magic >> version;
-        if (magic != "ADMIN_GRID_SAVE" || version != 1) {
+        if (magic != "ADMIN_GRID_SAVE" || version < 1 || version > 3) {
             addAlert("LOAD FAILED: SAVE FORMAT REJECTED.", rgba(218, 139, 154), 3.0f);
             return;
         }
         in >> cash_ >> profit_ >> upkeep_ >> stability_ >> purity_ >> variance_ >> exported_ >> goalComplete_ >> auditFailed_;
+        if (version >= 2) {
+            in >> auditPressure_ >> routeEfficiency_ >> exportPenalty_ >> containmentCost_;
+            if (version >= 3) in >> presetIndex_;
+            if (version >= 3) in >> dehumanisation_;
+        } else {
+            auditPressure_ = 0.0f;
+            routeEfficiency_ = 1.0f;
+            exportPenalty_ = 0.0f;
+            containmentCost_ = 0.0f;
+            presetIndex_ = 0;
+            dehumanisation_ = 0.0f;
+        }
+        presetIndex_ = std::max(0, std::min(2, presetIndex_));
         int tool = 1;
         int dir = 0;
         in >> camera_.x >> camera_.y >> zoom_ >> targetZoom_ >> tool >> dir;
@@ -810,8 +908,10 @@ private:
             int tile = 0, zone = 0, variant = 0, cellDir = 0, status = 0;
             in >> tile >> zone >> c.level >> c.growth >> c.pollution >> c.desirability
                >> variant >> cellDir >> status >> c.pink >> c.fuel >> c.gold >> c.refined;
+            if (version >= 2) in >> c.shutdownTimer;
             c.recentFlow = 0.0f;
             c.blockedFlow = 0.0f;
+            c.packetFlow = 0.0f;
             if (!in) {
                 addAlert("LOAD FAILED: SAVE FILE INCOMPLETE.", rgba(218, 139, 154), 3.0f);
                 generateMap();
@@ -821,7 +921,7 @@ private:
             c.zone = static_cast<Tile>(zone);
             c.variant = static_cast<uint8_t>(std::max(0, std::min(255, variant)));
             c.dir = static_cast<Direction>((cellDir % 4 + 4) % 4);
-            c.status = static_cast<BuildingStatus>(std::max(0, std::min(5, status)));
+            c.status = static_cast<BuildingStatus>(std::max(0, std::min(6, status)));
         }
         tool_ = static_cast<Tool>(tool);
         placementDir_ = static_cast<Direction>((dir % 4 + 4) % 4);
@@ -850,6 +950,14 @@ private:
             }
             if (e.type == SDL_MOUSEBUTTONDOWN) {
                 mouse_ = {static_cast<float>(e.button.x), static_cast<float>(e.button.y)};
+                if (mode_ == GameMode::Title && e.button.button == SDL_BUTTON_LEFT) {
+                    handleTitleClick(mouse_);
+                    continue;
+                }
+                if (mode_ == GameMode::Paused && e.button.button == SDL_BUTTON_LEFT) {
+                    handlePauseClick(mouse_);
+                    continue;
+                }
                 if (e.button.button == SDL_BUTTON_LEFT) {
                     Tool clickedTool = tool_;
                     if (toolAtUi(mouse_, clickedTool)) {
@@ -891,8 +999,35 @@ private:
                 }
             }
             if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+                if (mode_ == GameMode::Title) {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_ESCAPE: running_ = false; break;
+                        case SDLK_RETURN:
+                        case SDLK_SPACE: mode_ = GameMode::Playing; break;
+                        case SDLK_l: loadGame(); mode_ = GameMode::Playing; break;
+                        case SDLK_LEFT: cyclePreset(-1); break;
+                        case SDLK_RIGHT: cyclePreset(1); break;
+                        case SDLK_1: presetIndex_ = 0; generateMap(); mode_ = GameMode::Title; break;
+                        case SDLK_2: presetIndex_ = 1; generateMap(); mode_ = GameMode::Title; break;
+                        case SDLK_3: presetIndex_ = 2; generateMap(); mode_ = GameMode::Title; break;
+                        default: break;
+                    }
+                    continue;
+                }
+                if (mode_ == GameMode::Paused) {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_ESCAPE:
+                        case SDLK_SPACE: mode_ = GameMode::Playing; break;
+                        case SDLK_s: saveGame(); break;
+                        case SDLK_l: loadGame(); mode_ = GameMode::Playing; break;
+                        case SDLK_r: generateMap(); mode_ = GameMode::Playing; break;
+                        case SDLK_t: mode_ = GameMode::Title; break;
+                        default: break;
+                    }
+                    continue;
+                }
                 switch (e.key.keysym.sym) {
-                    case SDLK_ESCAPE: running_ = false; break;
+                    case SDLK_ESCAPE: mode_ = GameMode::Paused; painting_ = false; dragging_ = false; break;
                     case SDLK_1: tool_ = Tool::Road; break;
                     case SDLK_2: tool_ = Tool::Conveyor; break;
                     case SDLK_3: tool_ = Tool::Rail; break;
@@ -903,7 +1038,7 @@ private:
                     case SDLK_8: tool_ = Tool::Refinery; break;
                     case SDLK_9: tool_ = Tool::Port; break;
                     case SDLK_0: tool_ = Tool::Erase; break;
-                    case SDLK_SPACE: paused_ = !paused_; break;
+                    case SDLK_SPACE: mode_ = GameMode::Paused; break;
                     case SDLK_f: fog_ = !fog_; break;
                     case SDLK_p: pollutionOverlay_ = !pollutionOverlay_; break;
                     case SDLK_n: manualNight_ = !manualNight_; break;
@@ -962,6 +1097,26 @@ private:
         if (p.x >= rightX) return true;
         if (pointInRect(p, 16.0f, static_cast<float>(viewH_) - dockHeight() - 16.0f, dockWidth(), dockHeight())) return true;
         return false;
+    }
+
+    void handleTitleClick(Vec2 p) {
+        float cx = viewW_ * 0.5f - 180.0f;
+        float y = viewH_ * 0.5f - 36.0f;
+        if (pointInRect(p, cx, y, 360, 40)) { mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 52, 360, 40)) { loadGame(); mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 104, 174, 40)) { cyclePreset(-1); return; }
+        if (pointInRect(p, cx + 186, y + 104, 174, 40)) { cyclePreset(1); return; }
+        if (pointInRect(p, cx, y + 156, 360, 40)) { running_ = false; return; }
+    }
+
+    void handlePauseClick(Vec2 p) {
+        float cx = viewW_ * 0.5f - 140.0f;
+        float y = viewH_ * 0.5f - 94.0f;
+        if (pointInRect(p, cx, y, 280, 32)) { mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 40, 280, 32)) { saveGame(); return; }
+        if (pointInRect(p, cx, y + 80, 280, 32)) { loadGame(); mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 120, 280, 32)) { generateMap(); mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 160, 280, 32)) { mode_ = GameMode::Title; return; }
     }
 
     Direction directionFromDelta(int dx, int dy) const {
@@ -1154,6 +1309,7 @@ private:
             case BuildingStatus::OutputBlocked: return "OUTPUT BLOCKED";
             case BuildingStatus::NoRail: return "NO RAIL EXPORT";
             case BuildingStatus::Full: return "STORAGE FULL";
+            case BuildingStatus::Suspended: return "AUDIT SUSPENDED";
         }
         return "IDLE";
     }
@@ -1165,6 +1321,7 @@ private:
             case BuildingStatus::OutputBlocked: return rgba(218, 139, 154);
             case BuildingStatus::NoRail: return rgba(218, 139, 154);
             case BuildingStatus::Full: return rgba(214, 166, 92);
+            case BuildingStatus::Suspended: return rgba(176, 184, 176);
             default: return rgba(154, 163, 155);
         }
     }
@@ -1245,8 +1402,8 @@ private:
         if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) camera_.y -= speed * dt;
         if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]) camera_.y += speed * dt;
 
-        if (painting_) applyToolAtMouse();
-        if (paused_) return;
+        if (mode_ == GameMode::Playing && painting_) applyToolAtMouse();
+        if (mode_ != GameMode::Playing) return;
 
         simAccum_ += dt;
         if (simAccum_ < 0.35f) return;
@@ -1259,17 +1416,26 @@ private:
         float fuelTotal = 0.0f;
         float goldTotal = 0.0f;
         float refinedTotal = 0.0f;
+        float holdingPink = 0.0f;
         pollutionAverage_ = 0.0f;
-        int roads = 0, conveyors = 0, rails = 0, productive = 0;
+        int roads = 0, conveyors = 0, rails = 0, productive = 0, holdings = 0, refineries = 0, ports = 0;
         networkFlow_ = 0.0f;
         blockedFlow_ = 0.0f;
-        runningCount_ = starvedCount_ = blockedCount_ = noRailCount_ = fullCount_ = 0;
+        runningCount_ = starvedCount_ = blockedCount_ = noRailCount_ = fullCount_ = suspendedCount_ = 0;
+
+        float instability = clamp01((0.50f - stability_) * 1.45f + (variance_ - 0.48f) * 1.18f + std::max(0.0f, -cash_ - 120.0f) * 0.0017f);
+        auditPressure_ = clamp01(auditPressure_ * 0.965f + instability * 0.095f);
+        routeEfficiency_ = clamp01(1.0f - auditPressure_ * 0.28f - std::max(0.0f, 0.42f - stability_) * 0.25f);
+        routeEfficiency_ = std::max(0.55f, routeEfficiency_);
+        exportPenalty_ = clamp01(auditPressure_ * 0.30f + std::max(0.0f, variance_ - 0.55f) * 0.40f);
+        containmentCost_ = auditPressure_ * auditPressure_ * 12.0f;
 
         for (Cell& c : cells_) {
             c.recentFlow *= 0.68f;
             c.blockedFlow *= 0.58f;
             c.packetFlow *= 0.62f;
             if (c.packetFlow < 0.025f) c.packetKind = 0;
+            if (c.shutdownTimer > 0) --c.shutdownTimer;
         }
 
         const int dx[] = {1, -1, 0, 0};
@@ -1295,7 +1461,7 @@ private:
             if (!isStorageTile(n.tile)) return 0.0f;
             float capacity = n.tile == Tile::Holding || isProductionTile(n.tile) ? 18.0f : 5.0f;
             float space = std::max(0.0f, capacity - n.*resource);
-            float give = std::min(space, amount);
+            float give = std::min(space, amount * routeEfficiency_);
             n.*resource += give;
             return give;
         };
@@ -1371,18 +1537,24 @@ private:
                 if (c.tile == Tile::Road) ++roads;
                 if (c.tile == Tile::Conveyor) ++conveyors;
                 if (c.tile == Tile::Rail) ++rails;
+                if (c.tile == Tile::Holding) ++holdings;
+                if (c.tile == Tile::Refinery) ++refineries;
+                if (c.tile == Tile::Port) ++ports;
                 bool trackStatus = isProductionTile(c.tile) || c.tile == Tile::Holding;
+                bool suspended = trackStatus && c.shutdownTimer > 0;
 
-                if (c.tile == Tile::Block) {
-                    c.pink = std::min(12.0f, c.pink + 0.40f);
+                if (suspended) {
+                    c.status = BuildingStatus::Suspended;
+                } else if (c.tile == Tile::Block) {
+                    c.pink = std::min(12.0f, c.pink + 0.34f);
                     float moved = std::min(1.0f, c.pink);
                     float accepted = push(x, y, &Cell::pink, moved);
                     c.pink -= accepted;
                     c.status = accepted > 0.0f ? BuildingStatus::Running : BuildingStatus::OutputBlocked;
                     productive++;
                 } else if (c.tile == Tile::Mine) {
-                    float in = pull(x, y, &Cell::pink, 0.60f);
-                    c.fuel = std::min(12.0f, c.fuel + in * 0.72f);
+                    float in = pull(x, y, &Cell::pink, 0.52f);
+                    c.fuel = std::min(12.0f, c.fuel + in * 0.68f);
                     c.pollution = clamp01(c.pollution + in * 0.012f);
                     float moved = std::min(0.8f, c.fuel);
                     float accepted = push(x, y, &Cell::fuel, moved);
@@ -1390,9 +1562,9 @@ private:
                     c.status = in <= 0.0f ? BuildingStatus::Starved : (accepted > 0.0f ? BuildingStatus::Running : BuildingStatus::OutputBlocked);
                     productive++;
                 } else if (c.tile == Tile::Factory) {
-                    float pink = pull(x, y, &Cell::pink, 0.55f);
-                    float fuel = pull(x, y, &Cell::fuel, 0.42f);
-                    float made = std::min(pink, fuel * 1.25f) * 0.85f;
+                    float pink = pull(x, y, &Cell::pink, 0.50f);
+                    float fuel = pull(x, y, &Cell::fuel, 0.36f);
+                    float made = std::min(pink, fuel * 1.35f) * 0.82f;
                     c.gold = std::min(12.0f, c.gold + made);
                     c.pollution = clamp01(c.pollution + made * 0.010f);
                     float moved = std::min(0.8f, c.gold);
@@ -1401,9 +1573,9 @@ private:
                     c.status = made <= 0.0f ? BuildingStatus::Starved : (accepted > 0.0f ? BuildingStatus::Running : BuildingStatus::OutputBlocked);
                     productive++;
                 } else if (c.tile == Tile::Refinery) {
-                    float gold = pull(x, y, &Cell::gold, 0.72f);
-                    float fuel = pull(x, y, &Cell::fuel, 0.25f);
-                    float made = std::min(gold, fuel * 2.0f) * 0.78f;
+                    float gold = pull(x, y, &Cell::gold, 0.62f);
+                    float fuel = pull(x, y, &Cell::fuel, 0.23f);
+                    float made = std::min(gold, fuel * 2.1f) * 0.80f;
                     c.refined = std::min(12.0f, c.refined + made);
                     c.pollution = clamp01(c.pollution + made * 0.014f);
                     float moved = std::min(0.9f, c.refined);
@@ -1414,7 +1586,7 @@ private:
                 } else if (c.tile == Tile::Port) {
                     float shipment = pull(x, y, &Cell::refined, hasNeighborTile(x, y, Tile::Rail) ? 1.30f : 0.20f);
                     exported_ += shipment;
-                    float income = shipment * 42.0f;
+                    float income = shipment * 48.0f * (1.0f - exportPenalty_);
                     profit_ += income;
                     cash_ += income;
                     c.status = !hasNeighborTile(x, y, Tile::Rail) ? BuildingStatus::NoRail : (shipment > 0.0f ? BuildingStatus::Running : BuildingStatus::Starved);
@@ -1441,6 +1613,7 @@ private:
                     if (c.status == BuildingStatus::OutputBlocked) ++blockedCount_;
                     if (c.status == BuildingStatus::NoRail) ++noRailCount_;
                     if (c.status == BuildingStatus::Full) ++fullCount_;
+                    if (c.status == BuildingStatus::Suspended) ++suspendedCount_;
                 }
             }
         }
@@ -1450,16 +1623,17 @@ private:
             fuelTotal += c.fuel;
             goldTotal += c.gold;
             refinedTotal += c.refined;
+            if (c.tile == Tile::Holding) holdingPink += c.pink;
             pollutionAverage_ += c.pollution;
         }
         pollutionAverage_ /= static_cast<float>(MapW * MapH);
         float network = static_cast<float>(roads + conveyors + rails) / 160.0f;
         float stock = pinkTotal + fuelTotal + goldTotal + refinedTotal;
-        stability_ = clamp01(0.55f + roads * 0.0025f + rails * 0.0015f - pollutionAverage_ * 0.75f - stock * 0.0009f);
-        purity_ = clamp01(0.98f - pollutionAverage_ * 1.2f - std::max(0.0f, pinkTotal - 80.0f) * 0.0015f);
-        variance_ = clamp01(0.04f + stock * 0.0018f + productive * 0.002f - network * 0.05f);
-        upkeep_ = roads * 0.8f + conveyors * 1.1f + rails * 1.8f + productive * 4.0f;
-        cash_ -= upkeep_ * 0.035f;
+        stability_ = clamp01(0.64f + roads * 0.0019f + rails * 0.0013f - pollutionAverage_ * 0.62f - stock * 0.00065f - auditPressure_ * 0.08f);
+        purity_ = clamp01(0.99f - pollutionAverage_ * 1.05f - std::max(0.0f, pinkTotal - 95.0f) * 0.0011f);
+        variance_ = clamp01(0.025f + stock * 0.00135f + productive * 0.00155f - network * 0.045f + auditPressure_ * 0.035f);
+        upkeep_ = roads * 0.55f + conveyors * 0.85f + rails * 1.35f + productive * 3.2f + containmentCost_;
+        cash_ -= upkeep_ * 0.032f;
         budget_ = cash_;
         population_ = static_cast<int>(pinkTotal);
         jobs_ = static_cast<int>(exported_);
@@ -1467,6 +1641,24 @@ private:
         totalFuel_ = fuelTotal;
         totalGold_ = goldTotal;
         totalRefined_ = refinedTotal;
+
+        float bureaucraticDrift = holdingPink * 0.0014f + refineries * 0.0045f + ports * 0.002f + exported_ * 0.0009f + auditPressure_ * 0.018f;
+        dehumanisation_ = clamp01(dehumanisation_ * 0.997f + bureaucraticDrift);
+
+        if (auditPressure_ > 0.70f && productive > 0) {
+            std::uniform_real_distribution<float> roll(0.0f, 1.0f);
+            if (roll(rng_) < 0.11f * auditPressure_) {
+                int start = static_cast<int>(roll(rng_) * static_cast<float>(cells_.size()));
+                for (int i = 0; i < static_cast<int>(cells_.size()); ++i) {
+                    Cell& c = cells_[(start + i) % cells_.size()];
+                    if (isProductionTile(c.tile) && c.shutdownTimer <= 0) {
+                        c.shutdownTimer = 3 + static_cast<int>(roll(rng_) * 5.0f);
+                        addAlert("AUDIT HOLD: UNIT TEMPORARILY SUSPENDED.", rgba(218, 139, 154), 4.0f);
+                        break;
+                    }
+                }
+            }
+        }
 
         bool milestones[] = {
             totalPink_ > 3.0f,
@@ -1500,17 +1692,18 @@ private:
     }
 
     Color tileColor(const Cell& c) const {
+        float hope = 1.0f - dehumanisation_;
         switch (c.tile) {
-            case Tile::Road: return rgba(42, 43, 42);
-            case Tile::Conveyor: return rgba(53, 50, 55);
-            case Tile::Rail: return rgba(36, 37, 37);
+            case Tile::Road: return Color{0.18f + hope * 0.07f, 0.19f + hope * 0.08f, 0.18f + hope * 0.07f, 1.0f};
+            case Tile::Conveyor: return Color{0.26f + hope * 0.03f, 0.25f + hope * 0.05f, 0.27f + hope * 0.03f, 1.0f};
+            case Tile::Rail: return Color{0.16f + hope * 0.06f, 0.17f + hope * 0.06f, 0.16f + hope * 0.05f, 1.0f};
             case Tile::Block: return rgba(96, 70, 88);
-            case Tile::Holding: return rgba(70, 66, 74);
-            case Tile::Mine: return rgba(30, 29, 28);
-            case Tile::Factory: return rgba(96, 82, 44);
-            case Tile::Refinery: return rgba(125, 101, 42);
-            case Tile::Port: return rgba(68, 73, 76);
-            default: return rgba(70, 72, 69);
+            case Tile::Holding: return Color{0.25f + hope * 0.06f, 0.26f + hope * 0.08f, 0.27f + hope * 0.06f, 1.0f};
+            case Tile::Mine: return Color{0.12f + hope * 0.035f, 0.12f + hope * 0.035f, 0.11f + hope * 0.03f, 1.0f};
+            case Tile::Factory: return Color{0.38f + hope * 0.06f, 0.33f + hope * 0.07f, 0.19f + hope * 0.04f, 1.0f};
+            case Tile::Refinery: return Color{0.49f + hope * 0.06f, 0.41f + hope * 0.08f, 0.18f + hope * 0.04f, 1.0f};
+            case Tile::Port: return Color{0.29f + hope * 0.06f, 0.33f + hope * 0.07f, 0.34f + hope * 0.06f, 1.0f};
+            default: return Color{0.34f + hope * 0.10f, 0.37f + hope * 0.11f, 0.34f + hope * 0.09f, 1.0f};
         }
     }
 
@@ -1558,6 +1751,15 @@ private:
     }
 
     void addTexturedQuad(std::vector<Vertex>& out, float x, float y, float w, float h, Color c, float kind, int material, float repeat = 1.0f) {
+        if (kind > -0.5f && dehumanisation_ > 0.015f) {
+            float strength = dehumanisation_ * dehumanisation_ * 3.8f;
+            float nx = std::sin((x + y) * 0.031f + time_ * 0.17f) + std::sin(y * 0.047f - time_ * 0.09f) * 0.7f;
+            float ny = std::sin((x - y) * 0.026f - time_ * 0.13f) + std::sin(x * 0.039f + time_ * 0.11f) * 0.7f;
+            x += nx * strength;
+            y += ny * strength;
+            w *= 1.0f + std::sin((x + y) * 0.019f) * dehumanisation_ * 0.012f;
+            h *= 1.0f + std::cos((x - y) * 0.021f) * dehumanisation_ * 0.012f;
+        }
         float au, av, bu, bv, cu, cv, du, dv;
         materialUv(material, 0.0f, 0.0f, repeat, repeat, au, av, bu, bv, cu, cv, du, dv);
         Vertex a{x, y, c.r, c.g, c.b, c.a, kind, au, av};
@@ -1715,6 +1917,9 @@ private:
             addQuad(out, px + 4, py + TileSize - 6, TileSize - 8, 2, rgba(218, 139, 154, 185), 0.0f);
         } else if (c.status == BuildingStatus::Full) {
             addQuad(out, px + 4, py + 4, TileSize - 8, TileSize - 8, rgba(214, 166, 92, 54), 0.0f);
+        } else if (c.status == BuildingStatus::Suspended) {
+            addQuad(out, px + 5, py + 6, TileSize - 10, 2, rgba(176, 184, 176, 180), 0.0f);
+            addQuad(out, px + 5, py + 16, TileSize - 10, 2, rgba(176, 184, 176, 150), 0.0f);
         }
 
         if (stock > 0.1f) {
@@ -1756,6 +1961,13 @@ private:
             addTexturedQuad(out, px + 7, py + 9, 10 * clamp01(storedAmount(c) / 18.0f), 2, stored, 0.0f, 5);
             addTexturedQuad(out, px + 7, py + 14, 10 * clamp01(storedAmount(c) / 12.0f), 2, stored, 0.0f, 5);
             for (int i = 0; i < 3; ++i) addQuad(out, px + 7 + i * 4, py + 6, 2, 2, rgba(126, 128, 122, 120), 0.0f);
+            if (dehumanisation_ > 0.18f) {
+                Color fence = rgba(12, 12, 12, static_cast<uint8_t>(70 + dehumanisation_ * 120));
+                addQuad(out, px + 3, py + 2, 1, TileSize - 4, fence, 0.0f);
+                addQuad(out, px + TileSize - 4, py + 2, 1, TileSize - 4, fence, 0.0f);
+                addQuad(out, px + 5, py + 4, TileSize - 10, 1, fence, 0.0f);
+                addQuad(out, px + 5, py + TileSize - 5, TileSize - 10, 1, fence, 0.0f);
+            }
         } else if (c.tile == Tile::Mine) {
             addTexturedQuad(out, px + 4, py + 4, 16, 16, rgba(7, 7, 7, 220), 0.0f, 7);
             addTexturedQuad(out, px + 8, py + 8, 8, 8, rgba(52, 48, 42, 180), 0.0f, 7);
@@ -1776,12 +1988,20 @@ private:
             addQuad(out, px + 5, py + 9, 14, 2, rgba(232, 181, 62, 120), 0.0f);
             addQuad(out, px + 9, py + 4, 1, 16, rgba(75, 96, 72, 100), 0.0f);
             for (int i = 0; i < c.level; ++i) addQuad(out, px + 5 + i * 4, py + 17, 3, 1, rgba(238, 218, 148, 145), 0.0f);
+            if (dehumanisation_ > 0.22f) {
+                addQuad(out, px + 5, py + 5, 14, 2, rgba(128, 24, 24, static_cast<uint8_t>(60 + dehumanisation_ * 130)), 0.0f);
+                addQuad(out, px + 18, py + 6, 2, 12, rgba(24, 12, 12, static_cast<uint8_t>(80 + dehumanisation_ * 110)), 0.0f);
+            }
         } else if (c.tile == Tile::Port) {
             addTexturedQuad(out, px + 4, py + 6, 16, 12, rgba(50, 55, 58, 220), 0.0f, 10);
             addTexturedQuad(out, px + 6, py + 9, 12, 2, rgba(185, 145, 54, 120), 0.0f, 13);
             addQuad(out, px + 4, py + 18, 16, 2, rgba(31, 36, 38, 170), 0.0f);
             addQuad(out, px + 8, py + 5, 3, 14, rgba(96, 106, 107, 105), 0.0f);
             addQuad(out, px + 13, py + 6, 2 + c.level, 4, rgba(206, 214, 202, 75), 0.0f);
+            if (dehumanisation_ > 0.30f) addQuad(out, px + 5, py + 5, 15, 1, rgba(128, 24, 24, static_cast<uint8_t>(80 + dehumanisation_ * 110)), 0.0f);
+        }
+        if (dehumanisation_ > 0.36f && (c.tile == Tile::Holding || c.tile == Tile::Refinery || c.tile == Tile::Port)) {
+            addText(out, "X", px + 9, py + 8, 1.0f, rgba(118, 22, 22, static_cast<uint8_t>(75 + dehumanisation_ * 130)));
         }
         addActivityState(out, c, px, py);
         addBevel(out, px + 3, py + 3, TileSize - 6, TileSize - 6, rgba(220, 224, 208, 42), rgba(0, 0, 0, 115));
@@ -1886,6 +2106,7 @@ private:
             if (c.status == BuildingStatus::Starved) { stress = rgba(224, 182, 116, 150); amount = std::max(amount, 0.36f); }
             if (c.status == BuildingStatus::OutputBlocked || c.status == BuildingStatus::NoRail) { stress = rgba(218, 139, 154, 178); amount = std::max(amount, 0.48f); }
             if (c.status == BuildingStatus::Full) { stress = rgba(214, 166, 92, 150); amount = std::max(amount, 0.34f); }
+            if (c.status == BuildingStatus::Suspended) { stress = rgba(176, 184, 176, 165); amount = std::max(amount, 0.42f); }
             if (amount <= 0.04f) return;
             stress.a = std::min(0.70f, amount);
             addTexturedQuad(out, px + 2, py + 2, TileSize - 4, TileSize - 4, stress, 0.0f, 15);
@@ -1912,6 +2133,11 @@ private:
                 addTexturedQuad(out, px + 1, py + 1, TileSize - 2, TileSize - 2, mod(base, paper), static_cast<float>(static_cast<int>(c.tile)), tileMaterial(c.tile));
                 if (c.tile == Tile::Empty && ((x + y) % 11 == 0)) addQuad(out, px + 6, py + 6, 3, 1, rgba(115, 119, 111, 55), 0.0f);
                 if (c.tile == Tile::Empty && ((x * 3 + y) % 17 == 0)) addQuad(out, px + 15, py + 14, 1, 4, rgba(34, 36, 34, 45), 0.0f);
+                if (c.tile == Tile::Empty && dehumanisation_ < 0.20f && ((x * 5 + y * 7) % 29 == 0)) {
+                    uint8_t alpha = static_cast<uint8_t>((0.20f - dehumanisation_) * 430.0f);
+                    addQuad(out, px + 6, py + 6, 12, 1, rgba(156, 202, 166, alpha), 0.0f);
+                    addQuad(out, px + 6, py + 6, 1, 12, rgba(156, 202, 166, alpha), 0.0f);
+                }
                 addTileBorder(out, px, py, rgba(22, 24, 22, 72));
                 if (c.tile == Tile::Road) {
                     addRoadDetail(out, x, y, px, py);
@@ -2260,6 +2486,7 @@ private:
         glUniform1f(glGetUniformLocation(tileProgram_, "uTime"), time_);
         glUniform1f(glGetUniformLocation(tileProgram_, "uNight"), nightAmount());
         glUniform1f(glGetUniformLocation(tileProgram_, "uFog"), fog_ ? 1.0f : 0.0f);
+        glUniform1f(glGetUniformLocation(tileProgram_, "uUgly"), dehumanisation_);
         glBindVertexArray(tileVao_);
         glBindBuffer(GL_ARRAY_BUFFER, tileVbo_);
         glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(Vertex)), verts.data(), GL_DYNAMIC_DRAW);
@@ -2270,7 +2497,8 @@ private:
         glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
         glViewport(0, 0, viewW_, viewH_);
         float flicker = std::sin(time_ * 5.7f) * 0.003f + std::sin(time_ * 13.1f) * 0.002f;
-        glClearColor(0.045f + flicker, 0.055f + flicker, 0.06f + flicker, 1.0f);
+        float hope = 1.0f - dehumanisation_;
+        glClearColor(0.060f + hope * 0.030f + flicker, 0.066f + hope * 0.040f + flicker, 0.066f + hope * 0.030f + flicker, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         buildWorldBatch(worldVerts_);
@@ -2289,6 +2517,7 @@ private:
         glUniform1f(glGetUniformLocation(postProgram_, "uTime"), time_);
         glUniform1f(glGetUniformLocation(postProgram_, "uNight"), nightAmount());
         glUniform1f(glGetUniformLocation(postProgram_, "uPollution"), pollutionOverlay_ ? pollutionAverage_ : 0.0f);
+        glUniform1f(glGetUniformLocation(postProgram_, "uUgly"), dehumanisation_);
         glBindVertexArray(screenVao_);
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
@@ -2301,9 +2530,16 @@ private:
         const float rightX = static_cast<float>(viewW_) - rightW;
         const float dockW = dockWidth();
 
+        if (mode_ == GameMode::Title) {
+            addTitleMenu(uiVerts_);
+            Mat4 uiProj = ortho(0.0f, static_cast<float>(viewW_), static_cast<float>(viewH_), 0.0f);
+            renderBatch(uiVerts_, uiProj);
+            return;
+        }
+
         addPanel(uiVerts_, 0, 0, static_cast<float>(viewW_), topH, rgba(8, 10, 12, 232));
         addText(uiVerts_, "ADMINISTRATIVE GRID", 20, 16, 2.05f, rgba(226, 232, 222));
-        addText(uiVerts_, paused_ ? "PAUSED" : "RUNNING", 300, 18, 1.45f, paused_ ? rgba(222, 154, 154) : rgba(158, 205, 166));
+        addText(uiVerts_, mode_ == GameMode::Paused ? "PAUSED" : (mode_ == GameMode::Title ? "TITLE" : "RUNNING"), 300, 18, 1.45f, mode_ == GameMode::Paused ? rgba(222, 154, 154) : rgba(158, 205, 166));
         addPanel(uiVerts_, 408, 12, 196, 30, rgba(18, 21, 21, 220));
         addText(uiVerts_, "TOOL", 422, 21, 1.15f, rgba(126, 136, 128));
         addText(uiVerts_, toolName(), 482, 20, 1.45f, toolColor(tool_));
@@ -2326,20 +2562,23 @@ private:
         addMetric(uiVerts_, "PURITY", std::to_string(static_cast<int>(purity_ * 100)) + "%", purity_, metricX, topH + 158, rgba(200, 207, 198));
         addMetric(uiVerts_, "VARIANCE", std::to_string(static_cast<int>(variance_ * 100)) + "%", variance_, metricX, topH + 206, rgba(218, 139, 154));
         addMetric(uiVerts_, "EXPORTED", std::to_string(static_cast<int>(exported_)), clamp01(exported_ / exportGoal_), metricX, topH + 254, rgba(219, 196, 112));
+        if (dehumanisation_ > 0.08f) {
+            addText(uiVerts_, "CASE DRIFT " + std::to_string(static_cast<int>(dehumanisation_ * 100.0f)) + "%", metricX, topH + 296, 0.9f, dehumanisation_ > 0.45f ? rgba(218, 139, 154) : rgba(126, 136, 128));
+        }
 
         addPanel(uiVerts_, rightX + 18, topH + 318, rightW - 36, 72, rgba(10, 12, 12, 236));
         addText(uiVerts_, "THROUGHPUT", rightX + 34, topH + 334, 1.35f, rgba(164, 172, 164));
         addText(uiVerts_, std::to_string(static_cast<int>(networkFlow_ * 10.0f)) + "/STEP", rightX + 190, topH + 334, 1.35f, rgba(205, 214, 202));
         addText(uiVerts_, "BLOCKED", rightX + 34, topH + 362, 1.1f, rgba(126, 136, 128));
         addText(uiVerts_, std::to_string(static_cast<int>(blockedFlow_ * 10.0f)), rightX + 190, topH + 362, 1.1f, blockedFlow_ > 0.05f ? rgba(218, 139, 154) : rgba(126, 136, 128));
-        addText(uiVerts_, "VIEW " + overlayName(), rightX + 34, topH + 380, 0.9f, overlayMode_ == OverlayMode::Normal ? rgba(126, 136, 128) : rgba(205, 214, 202));
+        addText(uiVerts_, "EFF " + std::to_string(static_cast<int>(routeEfficiency_ * 100.0f)) + "%  AUDIT " + std::to_string(static_cast<int>(auditPressure_ * 100.0f)) + "%", rightX + 34, topH + 380, 0.9f, auditPressure_ > 0.35f ? rgba(218, 139, 154) : rgba(126, 136, 128));
         addQuad(uiVerts_, rightX + 260, topH + 335, 10, 10, overlayMode_ == OverlayMode::Flow ? rgba(158, 205, 166) : rgba(66, 74, 70), 0.0f);
         addQuad(uiVerts_, rightX + 276, topH + 335, 10, 10, blockedFlow_ > 0.05f ? rgba(218, 139, 154) : rgba(66, 74, 70), 0.0f);
 
         addPanel(uiVerts_, rightX + 18, topH + 404, rightW - 36, 74, rgba(10, 12, 12, 236));
         addText(uiVerts_, "OPERATIONS", rightX + 34, topH + 420, 1.25f, rgba(164, 172, 164));
         addText(uiVerts_, "RUN " + std::to_string(runningCount_) + "   STARVE " + std::to_string(starvedCount_), rightX + 34, topH + 448, 1.05f, starvedCount_ > 0 ? rgba(224, 182, 116) : rgba(190, 198, 184));
-        addText(uiVerts_, "BLOCK " + std::to_string(blockedCount_) + "   NORAIL " + std::to_string(noRailCount_) + "   FULL " + std::to_string(fullCount_), rightX + 34, topH + 468, 0.95f, (blockedCount_ + noRailCount_ + fullCount_) > 0 ? rgba(218, 139, 154) : rgba(126, 136, 128));
+        addText(uiVerts_, "BLOCK " + std::to_string(blockedCount_) + "   NORAIL " + std::to_string(noRailCount_) + "   HOLD " + std::to_string(suspendedCount_), rightX + 34, topH + 468, 0.95f, (blockedCount_ + noRailCount_ + suspendedCount_) > 0 ? rgba(218, 139, 154) : rgba(126, 136, 128));
 
         addPanel(uiVerts_, rightX + 18, topH + 492, rightW - 36, 126, rgba(10, 12, 12, 238));
         addText(uiVerts_, "DIRECTIVE", rightX + 34, topH + 506, 1.25f, rgba(176, 184, 176));
@@ -2411,12 +2650,53 @@ private:
             ay += 36.0f;
         }
 
-        if (paused_) {
-            addPanel(uiVerts_, viewW_ * 0.5f - 130, viewH_ * 0.5f - 34, 260, 68, rgba(0, 0, 0, 226));
-            addText(uiVerts_, "SIMULATION PAUSED", viewW_ * 0.5f - 94, viewH_ * 0.5f - 8, 1.9f, rgba(245, 245, 235));
-        }
+        if (mode_ == GameMode::Paused) addPauseMenu(uiVerts_);
         Mat4 uiProj = ortho(0.0f, static_cast<float>(viewW_), static_cast<float>(viewH_), 0.0f);
         renderBatch(uiVerts_, uiProj);
+    }
+
+    void addMenuButton(std::vector<Vertex>& out, const std::string& text, float x, float y, float w, float h, bool active = false) {
+        addPanel(out, x, y, w, h, active ? rgba(35, 40, 38, 244) : rgba(12, 14, 14, 242));
+        addText(out, text, x + 18, y + 11, 1.15f, active ? rgba(230, 236, 226) : rgba(190, 198, 184));
+    }
+
+    void addTitleMenu(std::vector<Vertex>& out) {
+        addQuad(out, 0, 0, static_cast<float>(viewW_), static_cast<float>(viewH_), rgba(0, 0, 0, 112), 0.0f);
+        float cx = viewW_ * 0.5f - 260.0f;
+        float y = viewH_ * 0.5f - 202.0f;
+        addPanel(out, cx, y, 520, 404, rgba(5, 8, 7, 248));
+        addText(out, "ADMINISTRATIVE GRID", cx + 42, y + 34, 2.25f, rgba(236, 242, 232));
+        addText(out, "EMPTY LANDSCAPE", cx + 42, y + 82, 1.05f, rgba(156, 188, 160));
+        addText(out, "ORGANISE FLOWS", cx + 220, y + 82, 1.05f, rgba(156, 188, 160));
+        addText(out, "AWAIT AUDIT", cx + 382, y + 82, 1.05f, rgba(156, 188, 160));
+        addPanel(out, cx + 42, y + 112, 436, 38, rgba(13, 20, 17, 242));
+        addText(out, "START PRESET", cx + 60, y + 124, 1.05f, rgba(126, 136, 128));
+        addText(out, presetName(), cx + 210, y + 123, 1.2f, rgba(219, 196, 112));
+        float bx = viewW_ * 0.5f - 180.0f;
+        float by = viewH_ * 0.5f - 36.0f;
+        addMenuButton(out, "NEW ADMINISTRATION", bx, by, 360, 40, true);
+        addMenuButton(out, "LOAD SAVE", bx, by + 52, 360, 40);
+        addMenuButton(out, "PRESET PREV", bx, by + 104, 174, 40);
+        addMenuButton(out, "PRESET NEXT", bx + 186, by + 104, 174, 40);
+        addMenuButton(out, "QUIT", bx, by + 156, 360, 40);
+        addText(out, "ENTER START   LEFT RIGHT PRESET   ESC QUIT", cx + 42, y + 368, 1.0f, rgba(126, 136, 128));
+    }
+
+    void addPauseMenu(std::vector<Vertex>& out) {
+        addQuad(out, 0, 0, static_cast<float>(viewW_), static_cast<float>(viewH_), rgba(0, 0, 0, 118), 0.0f);
+        float cx = viewW_ * 0.5f - 170.0f;
+        float y = viewH_ * 0.5f - 142.0f;
+        addPanel(out, cx, y, 340, 276, rgba(5, 6, 7, 246));
+        addText(out, "PAUSE MENU", cx + 30, y + 24, 1.8f, rgba(232, 236, 226));
+        addText(out, "AUDIT CLOCK HELD", cx + 30, y + 56, 0.9f, rgba(126, 136, 128));
+        float bx = viewW_ * 0.5f - 140.0f;
+        float by = viewH_ * 0.5f - 94.0f;
+        addMenuButton(out, "RESUME", bx, by, 280, 32, true);
+        addMenuButton(out, "SAVE GRID", bx, by + 40, 280, 32);
+        addMenuButton(out, "LOAD GRID", bx, by + 80, 280, 32);
+        addMenuButton(out, "NEW GRID", bx, by + 120, 280, 32);
+        addMenuButton(out, "TITLE", bx, by + 160, 280, 32);
+        addText(out, "ESC RESUME   S SAVE   L LOAD   R NEW", cx + 30, y + 246, 0.86f, rgba(126, 136, 128));
     }
 
     void render() {
@@ -2429,6 +2709,7 @@ private:
     SDL_GLContext gl_ = nullptr;
     bool running_ = true;
     bool paused_ = false;
+    GameMode mode_ = GameMode::Title;
     bool painting_ = false;
     bool dragging_ = false;
     bool zoomFocus_ = false;
@@ -2452,6 +2733,7 @@ private:
     OverlayMode overlayMode_ = OverlayMode::Normal;
     int lastPaintX_ = -1;
     int lastPaintY_ = -1;
+    int presetIndex_ = 0;
     int population_ = 0;
     int jobs_ = 0;
     float budget_ = 25000.0f;
@@ -2466,6 +2748,11 @@ private:
     float exportGoal_ = 50.0f;
     float networkFlow_ = 0.0f;
     float blockedFlow_ = 0.0f;
+    float auditPressure_ = 0.0f;
+    float routeEfficiency_ = 1.0f;
+    float exportPenalty_ = 0.0f;
+    float containmentCost_ = 0.0f;
+    float dehumanisation_ = 0.0f;
     float totalPink_ = 0.0f;
     float totalFuel_ = 0.0f;
     float totalGold_ = 0.0f;
@@ -2475,6 +2762,7 @@ private:
     int blockedCount_ = 0;
     int noRailCount_ = 0;
     int fullCount_ = 0;
+    int suspendedCount_ = 0;
     bool goalComplete_ = false;
     bool auditFailed_ = false;
     bool milestoneSeen_[5]{};

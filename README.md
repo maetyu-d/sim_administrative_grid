@@ -34,17 +34,27 @@ The first configure may download/build SDL2 if it is not installed.
 - `9`: port
 - `0`: erase
 - `Space`: pause simulation
+- `Esc`: open pause menu while playing / quit from title
 - `S`: save current grid
 - `L`: load saved grid
 - `F`: toggle fog overlay
 - `P`: toggle pollution overlay
 - `N`: force night/day blend
-- `R`: regenerate map
-- `Esc`: quit
+- `R`: regenerate current preset
+
+## Title And Presets
+
+- `Enter` / `Space`: start from the title screen
+- `Left` / `Right`: cycle start preset
+- `1`, `2`, `3`: choose Blank Grid, Rail Siding, or Diagnostic Chain
+- Title buttons: new administration, load save, preset previous/next, quit
+- Pause menu buttons: resume, save grid, load grid, new grid, title
 
 ## Prototype Features
 
 - Vast empty administrative grid
+- Title screen, pause menu, save/load flow, and selectable start presets
+- Start presets: blank administrative grid, rail siding, and diagnostic chain
 - Sparse logistics economy: blocks produce pink material, mines create fuel, factories make gold, refineries create export material, and ports sell it through rail access
 - Roads, conveyors, rails, holding structures, production buildings, and ports
 - Clickable construction cards with hover/selected states; UI clicks no longer place buildings behind panels
@@ -52,6 +62,7 @@ The first configure may download/build SDL2 if it is not installed.
 - Directional building outputs: structures face a direction and keep material when that output is blocked
 - Hover inspector with building states such as running, starved, output blocked, no rail export, and storage full
 - Construction costs, running upkeep, export income, cash pressure, and insufficient-funds alerts
+- Tuned economy curve with slower early pressure, lower early upkeep, better export reward, and later audit escalation
 - First quota: export 50 refined material while keeping stability above 60% and variance below 35%
 - Audit alerts for quota completion or severe instability
 - Save/load for grid layout, directions, stored resources, cash, quota state, and audit state
@@ -61,6 +72,9 @@ The first configure may download/build SDL2 if it is not installed.
 - Throughput visualization with animated material pulses, blocked-flow marks, route flow readouts, and ledger totals for network flow and blocked output
 - Moving resource packets on roads, conveyors, rails, and active structures, colored by material type: pink input, black fuel, gold output, and pale refined export
 - Building state visuals: active structures pulse, holdings visibly fill, blocked/starved buildings show warning marks, and production buildings gain small detail as activity/stock rises
+- Failure pressure system: low stability, high variance, and debt raise audit pressure, reducing route efficiency, lowering export income, adding containment costs, and temporarily suspending production units
+- Slow visual dehumanisation drift: holdings, refineries, export, stockpiling, and audit pressure make the palette uglier, add red administrative marks, fence holdings, stain processing structures, and subtly warp the grid itself
+- Early world tone starts cleaner, greener, and more civic-utopian, with faint planning marks and a calmer palette that decays as case drift rises
 - Analysis map views for stored resources, moving throughput, blocked routes, pollution, and starved/blocked buildings
 - Compact overview map showing route layout, active flow, blocked cells, resources, and the current camera footprint
 - Recipe and operations readability: production buildings show input requirement marks, output ports, hover recipes, and an operations summary for running/starved/blocked/no-rail/full structures
