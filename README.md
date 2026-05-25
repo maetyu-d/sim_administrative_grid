@@ -64,7 +64,8 @@ The first configure may download/build SDL2 if it is not installed.
 - Construction costs, running upkeep, export income, cash pressure, and insufficient-funds alerts
 - Tuned economy curve with slower early pressure, lower early upkeep, better export reward, and later audit escalation
 - First quota: export 50 refined material while keeping stability above 60% and variance below 35%
-- Audit alerts for quota completion or severe instability
+- Periodic audit reports that summarize routing, containment, variance, and transfer pressure in dry administrative language
+- End states for verified quota completion, insolvency, purity breach, and unreconciled control collapse
 - Save/load for grid layout, directions, stored resources, cash, quota state, and audit state
 - Build preview with valid/invalid site coloring, output-direction preview, cost checks, and safer placement rules to prevent dragging routes over production buildings
 - Smarter route placement with drag ghosting, inferred direction, and pre-click invalid-site feedback
@@ -74,6 +75,7 @@ The first configure may download/build SDL2 if it is not installed.
 - Building state visuals: active structures pulse, holdings visibly fill, blocked/starved buildings show warning marks, and production buildings gain small detail as activity/stock rises
 - Failure pressure system: low stability, high variance, and debt raise audit pressure, reducing route efficiency, lowering export income, adding containment costs, and temporarily suspending production units
 - Slow visual dehumanisation drift: holdings, refineries, export, stockpiling, and audit pressure make the palette uglier, add red administrative marks, fence holdings, stain processing structures, and subtly warp the grid itself
+- Terminology drift: as case drift rises, neutral labels like pink/export/refinery shift toward units, cases, transfer, removal, and disposition
 - Early world tone starts cleaner, greener, and more civic-utopian, with faint planning marks and a calmer palette that decays as case drift rises
 - Analysis map views for stored resources, moving throughput, blocked routes, pollution, and starved/blocked buildings
 - Compact overview map showing route layout, active flow, blocked cells, resources, and the current camera footprint

@@ -116,7 +116,16 @@ enum class OverlayMode : int {
 enum class GameMode : int {
     Title = 0,
     Playing = 1,
-    Paused = 2
+    Paused = 2,
+    End = 3
+};
+
+enum class EndState : int {
+    None = 0,
+    Verified = 1,
+    Collapse = 2,
+    Insolvency = 3,
+    PurityBreach = 4
 };
 
 struct Cell {
@@ -736,6 +745,10 @@ private:
         exported_ = 0.0f;
         goalComplete_ = false;
         auditFailed_ = false;
+        endState_ = EndState::None;
+        auditReportClock_ = 0.0f;
+        auditReportTtl_ = 0.0f;
+        lastAuditReport_.clear();
         for (bool& seen : milestoneSeen_) seen = false;
         alerts_.clear();
     }
@@ -925,6 +938,10 @@ private:
         }
         tool_ = static_cast<Tool>(tool);
         placementDir_ = static_cast<Direction>((dir % 4 + 4) % 4);
+        endState_ = EndState::None;
+        auditReportClock_ = 0.0f;
+        auditReportTtl_ = 0.0f;
+        lastAuditReport_.clear();
         budget_ = cash_;
         alerts_.clear();
         addAlert("SAVE LOADED: LEDGER RESTORED.", rgba(205, 214, 202), 3.0f);
@@ -956,6 +973,10 @@ private:
                 }
                 if (mode_ == GameMode::Paused && e.button.button == SDL_BUTTON_LEFT) {
                     handlePauseClick(mouse_);
+                    continue;
+                }
+                if (mode_ == GameMode::End && e.button.button == SDL_BUTTON_LEFT) {
+                    handleEndClick(mouse_);
                     continue;
                 }
                 if (e.button.button == SDL_BUTTON_LEFT) {
@@ -1022,6 +1043,17 @@ private:
                         case SDLK_l: loadGame(); mode_ = GameMode::Playing; break;
                         case SDLK_r: generateMap(); mode_ = GameMode::Playing; break;
                         case SDLK_t: mode_ = GameMode::Title; break;
+                        default: break;
+                    }
+                    continue;
+                }
+                if (mode_ == GameMode::End) {
+                    switch (e.key.keysym.sym) {
+                        case SDLK_ESCAPE:
+                        case SDLK_t: mode_ = GameMode::Title; break;
+                        case SDLK_RETURN:
+                        case SDLK_SPACE:
+                        case SDLK_r: generateMap(); mode_ = GameMode::Playing; break;
                         default: break;
                     }
                     continue;
@@ -1117,6 +1149,13 @@ private:
         if (pointInRect(p, cx, y + 80, 280, 32)) { loadGame(); mode_ = GameMode::Playing; return; }
         if (pointInRect(p, cx, y + 120, 280, 32)) { generateMap(); mode_ = GameMode::Playing; return; }
         if (pointInRect(p, cx, y + 160, 280, 32)) { mode_ = GameMode::Title; return; }
+    }
+
+    void handleEndClick(Vec2 p) {
+        float cx = viewW_ * 0.5f - 140.0f;
+        float y = viewH_ * 0.5f + 62.0f;
+        if (pointInRect(p, cx, y, 280, 34)) { generateMap(); mode_ = GameMode::Playing; return; }
+        if (pointInRect(p, cx, y + 44, 280, 34)) { mode_ = GameMode::Title; return; }
     }
 
     Direction directionFromDelta(int dx, int dy) const {
@@ -1216,13 +1255,34 @@ private:
         return 4;
     }
 
+    int driftStage() const {
+        if (dehumanisation_ > 0.62f) return 2;
+        if (dehumanisation_ > 0.28f) return 1;
+        return 0;
+    }
+
+    std::string materialTerm() const {
+        int stage = driftStage();
+        if (stage >= 2) return "CASES";
+        if (stage == 1) return "UNITS";
+        return "PINK";
+    }
+
+    std::string transferMetricName() const {
+        int stage = driftStage();
+        if (stage >= 2) return "REMOVED";
+        if (stage == 1) return "TRANSFER";
+        return "EXPORTED";
+    }
+
     std::string objectiveText(int step) const {
+        int stage = driftStage();
         switch (step) {
             case 0: return "BUILD BLOCK";
-            case 1: return "CONNECT MINE";
-            case 2: return "FEED FACTORY";
-            case 3: return "REFINE GOLD";
-            case 4: return "EXPORT VIA PORT";
+            case 1: return stage >= 2 ? "ROUTE CASES" : "CONNECT MINE";
+            case 2: return stage >= 1 ? "SUPPLY FACTORY" : "FEED FACTORY";
+            case 3: return stage >= 2 ? "DISPOSITION" : (stage == 1 ? "PROCESS GOLD" : "REFINE GOLD");
+            case 4: return stage >= 2 ? "REMOVE BY PORT" : (stage == 1 ? "TRANSFER BY PORT" : "EXPORT VIA PORT");
         }
         return "";
     }
@@ -1364,6 +1424,35 @@ private:
         if (alerts_.size() > 5) alerts_.erase(alerts_.begin());
     }
 
+    void addAuditReport() {
+        int stage = driftStage();
+        if (variance_ > 0.46f) {
+            lastAuditReport_ = stage >= 2 ? "VARIANCE NOTICE: UNROUTED CASES INCREASED. CONTAINMENT ADVISED."
+                                          : "VARIANCE NOTICE: MATERIAL AWAITS ROUTE CONFIRMATION.";
+        } else if (auditPressure_ > 0.52f) {
+            lastAuditReport_ = stage >= 2 ? "CONTROL NOTICE: TEMPORARY HOLDS AUTHORISED BY LEDGER."
+                                          : "CONTROL NOTICE: DELAYS FILED AS ACCEPTABLE LOSS.";
+        } else if (exported_ > 10.0f) {
+            lastAuditReport_ = stage >= 2 ? "AUDIT FINDING: CASES RECONCILED. EXIT AUTHORITY NOT RECORDED."
+                                          : "AUDIT FINDING: TRANSFER CHAIN OPERATING WITH MINOR LOSS.";
+        } else if (stage == 1) {
+            lastAuditReport_ = "AUDIT FINDING: UNITS HELD. ROUTE EFFICIENCY ABOVE HUMAN REVIEW.";
+        } else {
+            lastAuditReport_ = "VARIANCE REVIEW: ROUTES ACCEPTABLE. EXPORT AUTHORITY PENDING.";
+        }
+        auditReportTtl_ = 10.0f;
+        addAlert("AUDIT REPORT FILED.", rgba(205, 214, 202), 3.0f);
+    }
+
+    void triggerEnd(EndState state, const std::string& alert) {
+        if (endState_ != EndState::None) return;
+        endState_ = state;
+        mode_ = GameMode::End;
+        painting_ = false;
+        dragging_ = false;
+        addAlert(alert, state == EndState::Verified ? rgba(219, 196, 112) : rgba(218, 139, 154), 8.0f);
+    }
+
     Tile toolTile(Tool tool) const {
         switch (tool) {
             case Tool::Road: return Tile::Road;
@@ -1384,6 +1473,7 @@ private:
         time_ += dt;
         for (Alert& alert : alerts_) alert.ttl -= dt;
         alerts_.erase(std::remove_if(alerts_.begin(), alerts_.end(), [](const Alert& alert) { return alert.ttl <= 0.0f; }), alerts_.end());
+        if (auditReportTtl_ > 0.0f) auditReportTtl_ = std::max(0.0f, auditReportTtl_ - dt);
         float zoomEase = 1.0f - std::exp(-dt * 13.0f);
         zoom_ += (targetZoom_ - zoom_) * zoomEase;
         if (zoomFocus_) {
@@ -1644,6 +1734,11 @@ private:
 
         float bureaucraticDrift = holdingPink * 0.0014f + refineries * 0.0045f + ports * 0.002f + exported_ * 0.0009f + auditPressure_ * 0.018f;
         dehumanisation_ = clamp01(dehumanisation_ * 0.997f + bureaucraticDrift);
+        auditReportClock_ += 0.35f;
+        if (auditReportClock_ >= 24.0f + auditPressure_ * 18.0f) {
+            auditReportClock_ = 0.0f;
+            addAuditReport();
+        }
 
         if (auditPressure_ > 0.70f && productive > 0) {
             std::uniform_real_distribution<float> roll(0.0f, 1.0f);
@@ -1683,11 +1778,18 @@ private:
 
         if (!goalComplete_ && exported_ >= exportGoal_ && stability_ >= 0.60f && variance_ <= 0.35f) {
             goalComplete_ = true;
-            addAlert("QUOTA SATISFIED. AUDIT FILE REMAINS OPEN.", rgba(219, 196, 112), 7.0f);
+            triggerEnd(EndState::Verified, "QUOTA SATISFIED. AUDIT FILE CLOSED.");
         }
         if (!auditFailed_ && (stability_ < 0.35f || variance_ > 0.70f || cash_ < -250.0f)) {
             auditFailed_ = true;
             addAlert("AUDIT WARNING: ADMINISTRATIVE CONTROL DEGRADED.", rgba(218, 139, 154), 7.0f);
+        }
+        if (cash_ < -700.0f) {
+            triggerEnd(EndState::Insolvency, "LEDGER CLOSED: AUTHORITY INSOLVENT.");
+        } else if (purity_ < 0.55f) {
+            triggerEnd(EndState::PurityBreach, "PURITY BREACH FILED: SITE QUARANTINED.");
+        } else if (stability_ < 0.20f || (auditPressure_ > 0.98f && variance_ > 0.75f)) {
+            triggerEnd(EndState::Collapse, "CONTROL LOSS FILED: GRID UNRECONCILED.");
         }
     }
 
@@ -2247,32 +2349,34 @@ private:
     }
 
     std::string toolName() const {
+        int stage = driftStage();
         switch (tool_) {
             case Tool::Road: return "ROAD";
             case Tool::Conveyor: return "CONVEYOR";
             case Tool::Rail: return "RAIL";
-            case Tool::Block: return "BLOCK";
-            case Tool::Holding: return "HOLDING";
+            case Tool::Block: return stage >= 2 ? "SOURCE" : "BLOCK";
+            case Tool::Holding: return stage >= 2 ? "CASE HOLD" : (stage == 1 ? "HOLD AREA" : "HOLDING");
             case Tool::Mine: return "MINE";
             case Tool::Factory: return "FACTORY";
-            case Tool::Refinery: return "REFINERY";
-            case Tool::Port: return "PORT";
+            case Tool::Refinery: return stage >= 2 ? "DISPOSITION" : (stage == 1 ? "PROCESSING" : "REFINERY");
+            case Tool::Port: return stage >= 2 ? "REMOVAL" : (stage == 1 ? "TRANSFER" : "PORT");
             case Tool::Erase: return "ERASE";
         }
         return "";
     }
 
     std::string toolLabel(Tool tool) const {
+        int stage = driftStage();
         switch (tool) {
             case Tool::Road: return "ROAD";
             case Tool::Conveyor: return "BELT";
             case Tool::Rail: return "RAIL";
-            case Tool::Block: return "BLOCK";
-            case Tool::Holding: return "HOLD";
+            case Tool::Block: return stage >= 2 ? "SRC" : "BLOCK";
+            case Tool::Holding: return stage >= 2 ? "CASE" : (stage == 1 ? "AREA" : "HOLD");
             case Tool::Mine: return "MINE";
             case Tool::Factory: return "FACT";
-            case Tool::Refinery: return "REF";
-            case Tool::Port: return "PORT";
+            case Tool::Refinery: return stage >= 2 ? "DISP" : (stage == 1 ? "PROC" : "REF");
+            case Tool::Port: return stage >= 2 ? "RMVL" : (stage == 1 ? "TRAN" : "PORT");
             case Tool::Erase: return "ERASE";
         }
         return "";
@@ -2312,30 +2416,33 @@ private:
     }
 
     std::string tileName(Tile tile) const {
+        int stage = driftStage();
         switch (tile) {
             case Tile::Road: return "ROAD";
             case Tile::Conveyor: return "CONVEYOR";
             case Tile::Rail: return "RAIL";
-            case Tile::Block: return "BLOCK";
-            case Tile::Holding: return "HOLDING";
+            case Tile::Block: return stage >= 2 ? "SOURCE" : "BLOCK";
+            case Tile::Holding: return stage >= 2 ? "CASE HOLD" : (stage == 1 ? "HOLD AREA" : "HOLDING");
             case Tile::Mine: return "MINE";
             case Tile::Factory: return "FACTORY";
-            case Tile::Refinery: return "REFINERY";
-            case Tile::Port: return "PORT";
+            case Tile::Refinery: return stage >= 2 ? "DISPOSITION" : (stage == 1 ? "PROCESSING" : "REFINERY");
+            case Tile::Port: return stage >= 2 ? "REMOVAL" : (stage == 1 ? "TRANSFER" : "PORT");
             default: return "UNASSIGNED";
         }
     }
 
     std::string recipeText(Tile tile) const {
+        int stage = driftStage();
+        std::string m = materialTerm();
         switch (tile) {
-            case Tile::Block: return "OUT PINK";
-            case Tile::Mine: return "IN PINK  OUT FUEL";
-            case Tile::Factory: return "IN PINK+FUEL OUT GOLD";
-            case Tile::Refinery: return "IN GOLD+FUEL OUT REF";
-            case Tile::Port: return "IN REF EXPORT";
-            case Tile::Holding: return "BUFFER ALL";
+            case Tile::Block: return "OUT " + m;
+            case Tile::Mine: return "IN " + m + " OUT FUEL";
+            case Tile::Factory: return "IN " + m + "+FUEL OUT GOLD";
+            case Tile::Refinery: return stage >= 2 ? "DISPOSITION OFFICE" : (stage == 1 ? "IN GOLD+FUEL PROCESS" : "IN GOLD+FUEL OUT REF");
+            case Tile::Port: return stage >= 2 ? "EXIT AUTHORITY" : (stage == 1 ? "IN REF TRANSFER" : "IN REF EXPORT");
+            case Tile::Holding: return stage >= 2 ? "CASES HELD" : (stage == 1 ? "TEMPORARY HOLD" : "BUFFER ALL");
             case Tile::Conveyor: return "DIRECTIONAL ROUTE";
-            case Tile::Rail: return "EXPORT ROUTE";
+            case Tile::Rail: return stage >= 1 ? "TRANSFER ROUTE" : "EXPORT ROUTE";
             case Tile::Road: return "LOW VOLUME ROUTE";
             default: return "";
         }
@@ -2539,7 +2646,8 @@ private:
 
         addPanel(uiVerts_, 0, 0, static_cast<float>(viewW_), topH, rgba(8, 10, 12, 232));
         addText(uiVerts_, "ADMINISTRATIVE GRID", 20, 16, 2.05f, rgba(226, 232, 222));
-        addText(uiVerts_, mode_ == GameMode::Paused ? "PAUSED" : (mode_ == GameMode::Title ? "TITLE" : "RUNNING"), 300, 18, 1.45f, mode_ == GameMode::Paused ? rgba(222, 154, 154) : rgba(158, 205, 166));
+        std::string modeLabel = mode_ == GameMode::Paused ? "PAUSED" : (mode_ == GameMode::End ? "CLOSED" : "RUNNING");
+        addText(uiVerts_, modeLabel, 300, 18, 1.45f, mode_ == GameMode::End ? rgba(218, 139, 154) : (mode_ == GameMode::Paused ? rgba(222, 154, 154) : rgba(158, 205, 166)));
         addPanel(uiVerts_, 408, 12, 196, 30, rgba(18, 21, 21, 220));
         addText(uiVerts_, "TOOL", 422, 21, 1.15f, rgba(126, 136, 128));
         addText(uiVerts_, toolName(), 482, 20, 1.45f, toolColor(tool_));
@@ -2561,7 +2669,7 @@ private:
         addMetric(uiVerts_, "STABILITY", std::to_string(static_cast<int>(stability_ * 100)) + "%", stability_, metricX, topH + 110, rgba(176, 204, 177));
         addMetric(uiVerts_, "PURITY", std::to_string(static_cast<int>(purity_ * 100)) + "%", purity_, metricX, topH + 158, rgba(200, 207, 198));
         addMetric(uiVerts_, "VARIANCE", std::to_string(static_cast<int>(variance_ * 100)) + "%", variance_, metricX, topH + 206, rgba(218, 139, 154));
-        addMetric(uiVerts_, "EXPORTED", std::to_string(static_cast<int>(exported_)), clamp01(exported_ / exportGoal_), metricX, topH + 254, rgba(219, 196, 112));
+        addMetric(uiVerts_, transferMetricName(), std::to_string(static_cast<int>(exported_)), clamp01(exported_ / exportGoal_), metricX, topH + 254, rgba(219, 196, 112));
         if (dehumanisation_ > 0.08f) {
             addText(uiVerts_, "CASE DRIFT " + std::to_string(static_cast<int>(dehumanisation_ * 100.0f)) + "%", metricX, topH + 296, 0.9f, dehumanisation_ > 0.45f ? rgba(218, 139, 154) : rgba(126, 136, 128));
         }
@@ -2650,7 +2758,16 @@ private:
             ay += 36.0f;
         }
 
+        if (auditReportTtl_ > 0.0f && !lastAuditReport_.empty()) {
+            float rx = std::max(24.0f, static_cast<float>(viewW_) * 0.5f - 360.0f);
+            float ry = topH + 16.0f;
+            addPanel(uiVerts_, rx, ry, 620, 54, rgba(8, 10, 12, 230));
+            addText(uiVerts_, "AUDIT REPORT", rx + 16, ry + 10, 1.0f, rgba(219, 196, 112));
+            addText(uiVerts_, lastAuditReport_, rx + 16, ry + 30, 0.86f, rgba(205, 214, 202));
+        }
+
         if (mode_ == GameMode::Paused) addPauseMenu(uiVerts_);
+        if (mode_ == GameMode::End) addEndMenu(uiVerts_);
         Mat4 uiProj = ortho(0.0f, static_cast<float>(viewW_), static_cast<float>(viewH_), 0.0f);
         renderBatch(uiVerts_, uiProj);
     }
@@ -2699,6 +2816,54 @@ private:
         addText(out, "ESC RESUME   S SAVE   L LOAD   R NEW", cx + 30, y + 246, 0.86f, rgba(126, 136, 128));
     }
 
+    std::string endStateTitle() const {
+        switch (endState_) {
+            case EndState::Verified: return "VERIFICATION ENTERED";
+            case EndState::Collapse: return "CONTROL UNRECONCILED";
+            case EndState::Insolvency: return "LEDGER INSOLVENT";
+            case EndState::PurityBreach: return "PURITY BREACH FILED";
+            default: return "FILE CLOSED";
+        }
+    }
+
+    std::array<std::string, 3> endStateBody() const {
+        switch (endState_) {
+            case EndState::Verified:
+                return {"QUOTA SATISFIED. THE MAP ACCEPTS THE ROUTE.", "AUDIT NOTES: AUTHORITY REMAINS EXTERNAL.", "NO PERSON IS NAMED IN THE EXPORT RECORD."};
+            case EndState::Collapse:
+                return {"ROUTES CONTRADICT. HOLDINGS EXCEED FORM CAPACITY.", "THE GRID REMAINS VISIBLE BUT NO LONGER AGREES WITH ITSELF.", "RECONCILIATION REQUIRES AN OFFICE NOT PRESENT ON SITE."};
+            case EndState::Insolvency:
+                return {"CASH AUTHORITY EXHAUSTED. WORK ORDERS CONTINUE.", "THE LEDGER REFUSES FURTHER EXPLANATION.", "RESPONSIBILITY IS TRANSFERRED TO A FUTURE CLERK."};
+            case EndState::PurityBreach:
+                return {"PURITY STANDARD FAILED. SITE PLACED UNDER QUIET SEAL.", "EXPORT PERMISSION IS WITHHELD PENDING INDEPENDENT SOURCES.", "THE MATERIAL REMAINS WHERE THE PROCESS LEFT IT."};
+            default:
+                return {"THE FILE HAS NO CLOSING AUTHORITY.", "THE LANDSCAPE WAITS FOR A NEW ADMINISTRATION.", ""};
+        }
+    }
+
+    void addEndMenu(std::vector<Vertex>& out) {
+        addQuad(out, 0, 0, static_cast<float>(viewW_), static_cast<float>(viewH_), rgba(0, 0, 0, 138), 0.0f);
+        float cx = viewW_ * 0.5f - 270.0f;
+        float y = viewH_ * 0.5f - 176.0f;
+        addPanel(out, cx, y, 540, 352, rgba(5, 6, 7, 248));
+        addText(out, endStateTitle(), cx + 36, y + 30, 1.75f, endState_ == EndState::Verified ? rgba(219, 196, 112) : rgba(218, 139, 154));
+        addText(out, "AUDIT TERMINAL", cx + 36, y + 66, 0.95f, rgba(126, 136, 128));
+        auto body = endStateBody();
+        addText(out, body[0], cx + 36, y + 106, 1.05f, rgba(205, 214, 202));
+        addText(out, body[1], cx + 36, y + 132, 1.05f, rgba(176, 184, 176));
+        if (!body[2].empty()) addText(out, body[2], cx + 36, y + 158, 1.05f, rgba(176, 184, 176));
+        std::string figures = "CASH $" + std::to_string(static_cast<int>(cash_)) +
+                              "   STABILITY " + std::to_string(static_cast<int>(stability_ * 100.0f)) + "%" +
+                              "   VARIANCE " + std::to_string(static_cast<int>(variance_ * 100.0f)) + "%";
+        addPanel(out, cx + 36, y + 196, 468, 36, rgba(12, 14, 14, 242));
+        addText(out, figures, cx + 54, y + 208, 0.95f, rgba(190, 198, 184));
+        float bx = viewW_ * 0.5f - 140.0f;
+        float by = viewH_ * 0.5f + 62.0f;
+        addMenuButton(out, "NEW GRID", bx, by, 280, 34, true);
+        addMenuButton(out, "TITLE", bx, by + 44, 280, 34);
+        addText(out, "ENTER NEW   T TITLE", cx + 36, y + 324, 0.9f, rgba(126, 136, 128));
+    }
+
     void render() {
         renderWorld();
         renderUi();
@@ -2710,6 +2875,7 @@ private:
     bool running_ = true;
     bool paused_ = false;
     GameMode mode_ = GameMode::Title;
+    EndState endState_ = EndState::None;
     bool painting_ = false;
     bool dragging_ = false;
     bool zoomFocus_ = false;
@@ -2753,6 +2919,8 @@ private:
     float exportPenalty_ = 0.0f;
     float containmentCost_ = 0.0f;
     float dehumanisation_ = 0.0f;
+    float auditReportClock_ = 0.0f;
+    float auditReportTtl_ = 0.0f;
     float totalPink_ = 0.0f;
     float totalFuel_ = 0.0f;
     float totalGold_ = 0.0f;
@@ -2766,6 +2934,7 @@ private:
     bool goalComplete_ = false;
     bool auditFailed_ = false;
     bool milestoneSeen_[5]{};
+    std::string lastAuditReport_;
     std::mt19937 rng_;
     std::vector<Cell> cells_;
     std::vector<Vertex> worldVerts_;
