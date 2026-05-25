@@ -1102,7 +1102,7 @@ private:
     }
 
     float rightPanelWidth() const { return 336.0f; }
-    float dockHeight() const { return 128.0f; }
+    float dockHeight() const { return 156.0f; }
     float topBarHeight() const { return 54.0f; }
 
     float dockWidth() const {
@@ -1111,7 +1111,7 @@ private:
 
     bool toolAtUi(Vec2 p, Tool& outTool) const {
         float bx = 34.0f;
-        float by = static_cast<float>(viewH_) - 104.0f;
+        float by = static_cast<float>(viewH_) - dockHeight() + 52.0f;
         const float bw = 72.0f;
         for (Tool tool : toolOrder()) {
             if (pointInRect(p, bx, by, bw - 8, 58.0f)) {
@@ -2703,7 +2703,7 @@ private:
         Vec2 hover = screenToWorld(mouse_);
         int hx = static_cast<int>(hover.x / TileSize);
         int hy = static_cast<int>(hover.y / TileSize);
-        addPanel(uiVerts_, rightX + 18, topH + 632, rightW - 36, 92, rgba(10, 12, 12, 238));
+        addPanel(uiVerts_, rightX + 18, topH + 626, rightW - 36, 116, rgba(7, 9, 9, 246));
         addText(uiVerts_, "INSPECT", rightX + 34, topH + 646, 1.15f, rgba(176, 184, 176));
         if (inside(hx, hy)) {
             const Cell& c = cells_[index(hx, hy)];
@@ -2711,6 +2711,7 @@ private:
             std::string dir = (c.tile == Tile::Empty) ? "" : " " + directionName(c.dir);
             std::string recipe = recipeText(c.tile);
             addText(uiVerts_, recipe.empty() ? "NO RECIPE" : recipe, rightX + 34, topH + 692, 0.85f, rgba(150, 160, 151));
+            addQuad(uiVerts_, rightX + 30, topH + 706, rightW - 60, 22, rgba(0, 0, 0, 92), 0.0f);
             addText(uiVerts_, "P" + std::to_string(static_cast<int>(c.pink)) + " F" + std::to_string(static_cast<int>(c.fuel)) + " G" + std::to_string(static_cast<int>(c.gold)) + " R" + std::to_string(static_cast<int>(c.refined)) + dir, rightX + 34, topH + 710, 0.82f, rgba(180, 190, 181));
             if (isProductionTile(c.tile) || c.tile == Tile::Holding) {
                 addText(uiVerts_, statusName(c.status), rightX + 196, topH + 710, 0.82f, statusColor(c.status));
@@ -2725,10 +2726,11 @@ private:
             addText(uiVerts_, "NO CELL", rightX + 34, topH + 670, 1.2f, rgba(126, 136, 128));
         }
 
-        addPanel(uiVerts_, 16, static_cast<float>(viewH_) - dockH - 16, dockW, dockH, rgba(8, 10, 12, 224));
-        addText(uiVerts_, "CONSTRUCTION", 34, static_cast<float>(viewH_) - dockH + 2, 1.45f, rgba(154, 163, 155));
+        float dockY = static_cast<float>(viewH_) - dockH - 14.0f;
+        addPanel(uiVerts_, 16, dockY, dockW, dockH, rgba(6, 8, 8, 238));
+        addText(uiVerts_, "CONSTRUCTION", 34, dockY + 18, 1.4f, rgba(178, 188, 178));
         float bx = 34.0f;
-        float by = static_cast<float>(viewH_) - 104.0f;
+        float by = static_cast<float>(viewH_) - dockH + 52.0f;
         const float bw = 72.0f;
         Tool hoverTool = tool_;
         bool hoveringTool = toolAtUi(mouse_, hoverTool);
@@ -2746,10 +2748,11 @@ private:
         }
 
         if (dockW > 880.0f) {
-            addMiniMap(uiVerts_, 16.0f + dockW - 98.0f, static_cast<float>(viewH_) - dockH + 26.0f, 74.0f);
+            addMiniMap(uiVerts_, 16.0f + dockW - 106.0f, dockY + 42.0f, 82.0f);
         }
 
-        addText(uiVerts_, "LMB BUILD   TAB VIEW   Q/E ROTATE   S SAVE   L LOAD   F FOG   P STAIN   N NIGHT   R RESET", 34, static_cast<float>(viewH_) - 24, 1.2f, rgba(132, 144, 136));
+        addPanel(uiVerts_, 30, dockY + dockH - 28.0f, std::min(940.0f, dockW - 150.0f), 22.0f, rgba(3, 5, 5, 230));
+        addText(uiVerts_, "LMB BUILD   TAB VIEW   Q/E ROTATE   S SAVE   L LOAD   F FOG   P STAIN   N NIGHT   R RESET", 44, dockY + dockH - 22.0f, 0.95f, rgba(184, 196, 186));
 
         float ay = 70.0f;
         for (const Alert& alert : alerts_) {
